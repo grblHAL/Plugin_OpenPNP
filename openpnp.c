@@ -35,7 +35,7 @@ static on_report_options_ptr on_report_options;
 
 static user_mcode_t userMCodeCheck (user_mcode_t mcode)
 {
-    return (uint32_t)mcode == 42 || (uint32_t)mcode == 114 || (uint32_t)mcode == 115 || (uint32_t)mcode == 204 || mcode == (uint32_t)400
+    return (uint32_t)mcode == 42 || (uint32_t)mcode == 105 || (uint32_t)mcode == 114 || (uint32_t)mcode == 115 || (uint32_t)mcode == 204 || mcode == (uint32_t)400
             ? mcode
             : (user_mcode.check ? user_mcode.check(mcode) : UserMCode_Ignore);
 }
@@ -62,6 +62,16 @@ static status_code_t userMCodeValidate (parser_block_t *gc_block, parameter_word
                     } else
                         state = Status_InvalidStatement;
                 }
+            }
+            break;
+
+        case 105:
+            if((*value_words).t) {
+                if(gc_block->values.t < hal.port.num_analog_in) {
+                    (*value_words).t = Off;
+                    state = Status_OK;
+                } else
+                    state = Status_InvalidStatement;
             }
             break;
 
@@ -132,6 +142,15 @@ static void userMCodeExecute (uint_fast16_t state, parser_block_t *gc_block)
 
         case 42:
             hal.port.digital_out(gc_block->values.p, gc_block->values.s != 0.0f);
+            break;
+
+
+        case 105:
+            {
+                // ?? Marlin: ...to be sent to the host at some point in the future. Schedule with protocol_enqueue_rt_command?
+                int32_t v = hal.port.wait_on_input(false, gc_block->values.t, WaitMode_Immediate, 0.0f);
+                // format output -> T:21.17 /0.0000 B:21.04 /0.0000 @:0 B@:0
+            }
             break;
 
         case 114:

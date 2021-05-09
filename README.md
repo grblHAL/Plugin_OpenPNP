@@ -4,7 +4,7 @@ Under development. Adds 5 M-codes to allow grblHAL to be used for [OpenPNP](http
 
 * `M42 P- S-` Set digital output. The P-word must be a valid ioport number, see below. The S-word is used to turn the output on or off. Use 0 for off, > 0 for on.
 
-* `M114 \<P-\>` reports current position. The P-word is ignored.
+* `M114 <P->` reports current position. The P-word is ignored if provided.
 
 * `M115` Reports firmware information.
 
