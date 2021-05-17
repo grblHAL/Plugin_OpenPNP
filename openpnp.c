@@ -32,10 +32,13 @@
 
 static user_mcode_ptrs_t user_mcode;
 static on_report_options_ptr on_report_options;
+static parameter_words_t m204_words;
+static uint8_t tport;
 
 static user_mcode_t userMCodeCheck (user_mcode_t mcode)
 {
-    return (uint32_t)mcode == 42 || (uint32_t)mcode == 105 || (uint32_t)mcode == 114 || (uint32_t)mcode == 115 || (uint32_t)mcode == 204 || mcode == (uint32_t)400
+    return (uint32_t)mcode == 42 || (uint32_t)mcode == 105 || (uint32_t)mcode == 114 || (uint32_t)mcode == 115 ||
+             (uint32_t)mcode == 204 || mcode == (uint32_t)400 || mcode == (uint32_t)502
             ? mcode
             : (user_mcode.check ? user_mcode.check(mcode) : UserMCode_Ignore);
 }
@@ -92,6 +95,7 @@ static status_code_t userMCodeValidate (parser_block_t *gc_block, parameter_word
                 state = Status_BadNumberFormat;
 
             if(state != Status_BadNumberFormat) {
+                m204_words = *value_words;
                 (*value_words).p = (*value_words).r = (*value_words).s = (*value_words).t = Off;
                 // TODO: add validation
                 state = Status_OK;
@@ -100,6 +104,7 @@ static status_code_t userMCodeValidate (parser_block_t *gc_block, parameter_word
 
         case 115:
         case 400:
+        case 502:
             state = Status_OK;
             break;
 
@@ -133,6 +138,12 @@ static void report_position (void)
     hal.stream.write(buf);
 }
 
+static void report_temperature (sys_state_t state)
+{
+    int32_t v = hal.port.wait_on_input(false, tport, WaitMode_Immediate, 0.0f);
+    // format output -> T:21.17 /0.0000 B:21.04 /0.0000 @:0 B@:0
+}
+
 static void userMCodeExecute (uint_fast16_t state, parser_block_t *gc_block)
 {
     bool handled = true;
@@ -145,12 +156,9 @@ static void userMCodeExecute (uint_fast16_t state, parser_block_t *gc_block)
             break;
 
 
-        case 105:
-            {
-                // ?? Marlin: ...to be sent to the host at some point in the future. Schedule with protocol_enqueue_rt_command?
-                int32_t v = hal.port.wait_on_input(false, gc_block->values.t, WaitMode_Immediate, 0.0f);
-                // format output -> T:21.17 /0.0000 B:21.04 /0.0000 @:0 B@:0
-            }
+        case 105: // Request temperature report
+            tport = gc_block->values.t;
+            protocol_enqueue_rt_command(report_temperature);
             break;
 
         case 114:
@@ -164,13 +172,34 @@ static void userMCodeExecute (uint_fast16_t state, parser_block_t *gc_block)
             hal.stream.write("FIRMWARE_BUILD:" GRBL_VERSION_BUILD ASCII_EOL);
             break;
 
-        case 204:
-            protocol_buffer_synchronize();
-            // TODO: set acceleration - needs core modification
+        case 204: // Set acceleration
+            {
+                uint_fast8_t idx = N_AXIS;
+
+                protocol_buffer_synchronize();
+                do {
+                    idx--;
+                    if(m204_words.s || idx == X_AXIS || idx == Y_AXIS)
+                        settings_override_acceleration(idx, m204_words.s ? gc_block->values.s : gc_block->values.t);
+                    else
+                        settings_override_acceleration(idx, gc_block->values.p);
+                } while(idx);
+            }
             break;
 
-        case 400:
+        case 400: // Wait for buffered motions to complete
             protocol_buffer_synchronize();
+            break;
+
+        case 502: // Restore acceleration to configured values
+            {
+                uint_fast8_t idx = N_AXIS;
+
+                protocol_buffer_synchronize();
+                do {
+                    settings_override_acceleration(--idx, 0.0f);
+                } while(idx);
+            }
             break;
 
         default:
