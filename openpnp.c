@@ -25,6 +25,7 @@
 
 #if OPENPNP_ENABLE
 
+#include <math.h>
 #include <string.h>
 
 #include "grbl/hal.h"
@@ -32,35 +33,36 @@
 
 static user_mcode_ptrs_t user_mcode;
 static on_report_options_ptr on_report_options;
-static parameter_words_t m204_words;
 static uint8_t tport;
 
 static user_mcode_t userMCodeCheck (user_mcode_t mcode)
 {
-    return (uint32_t)mcode == 42 || (uint32_t)mcode == 105 || (uint32_t)mcode == 114 || (uint32_t)mcode == 115 ||
-             (uint32_t)mcode == 204 || mcode == (uint32_t)400 || mcode == (uint32_t)502
+    return mcode == OpenPNP_SetPinState || mcode == OpenPNP_GetADCReading || mcode == OpenPNP_GetCurrentPosition || mcode == OpenPNP_FirmwareInfo ||
+             mcode == OpenPNP_SetAcceleration || mcode == OpenPNP_FinishMoves || mcode == OpenPNP_SettingsReset
             ? mcode
             : (user_mcode.check ? user_mcode.check(mcode) : UserMCode_Ignore);
 }
 
-static status_code_t userMCodeValidate (parser_block_t *gc_block, parameter_words_t *value_words)
+static status_code_t userMCodeValidate (parser_block_t *gc_block, parameter_words_t *deprecated)
 {
     status_code_t state = Status_GcodeValueWordMissing;
 
-    switch((uint32_t)gc_block->user_mcode) {
+    UNUSED(deprecated);
 
-        case 42:
-            if((*value_words).p && (*value_words).s) {
+    switch(gc_block->user_mcode) {
 
-                if((*value_words).p && isnan(gc_block->values.p))
+        case OpenPNP_SetPinState:
+            if(gc_block->words.p && gc_block->words.s) {
+
+                if(gc_block->words.p && isnan(gc_block->values.p))
                     state = Status_BadNumberFormat;
 
-                if((*value_words).s && isnan(gc_block->values.s))
+                if(gc_block->words.s && isnan(gc_block->values.s))
                     state = Status_BadNumberFormat;
 
                 if(state != Status_BadNumberFormat) {
                     if(gc_block->values.p <= 255.0f && (uint8_t)gc_block->values.p < hal.port.num_digital_out) {
-                        (*value_words).p = (*value_words).s = Off;
+                        gc_block->words.p = gc_block->words.s = Off;
                         state = Status_OK;
                     } else
                         state = Status_InvalidStatement;
@@ -68,43 +70,42 @@ static status_code_t userMCodeValidate (parser_block_t *gc_block, parameter_word
             }
             break;
 
-        case 105:
-            if((*value_words).t) {
+        case OpenPNP_GetADCReading:
+            if(gc_block->words.t) {
                 if(gc_block->values.t < hal.port.num_analog_in) {
-                    (*value_words).t = Off;
+                    gc_block->words.t = Off;
                     state = Status_OK;
                 } else
                     state = Status_InvalidStatement;
             }
             break;
 
-        case 114:
-            (*value_words).d = Off;
+        case OpenPNP_GetCurrentPosition:
+            gc_block->words.d = Off;
             // check if d value is 0 or 1?
             state = Status_OK;
             break;
 
-        case 204:
-            if((*value_words).p && isnan(gc_block->values.p))
+        case OpenPNP_SetAcceleration:
+            if(gc_block->words.p && isnan(gc_block->values.p))
                 state = Status_BadNumberFormat;
 
-            if((*value_words).r && isnan(gc_block->values.r))
+            if(gc_block->words.r && isnan(gc_block->values.r))
                 state = Status_BadNumberFormat;
 
-            if((*value_words).s && isnan(gc_block->values.s))
+            if(gc_block->words.s && isnan(gc_block->values.s))
                 state = Status_BadNumberFormat;
 
             if(state != Status_BadNumberFormat) {
-                m204_words = *value_words;
-                (*value_words).p = (*value_words).r = (*value_words).s = (*value_words).t = Off;
+                gc_block->words.p = gc_block->words.r = gc_block->words.s = gc_block->words.t = Off;
                 // TODO: add validation
                 state = Status_OK;
             }
             break;
 
-        case 115:
-        case 400:
-        case 502:
+        case OpenPNP_FirmwareInfo:
+        case OpenPNP_FinishMoves:
+        case OpenPNP_SettingsReset:
             state = Status_OK;
             break;
 
@@ -113,7 +114,7 @@ static status_code_t userMCodeValidate (parser_block_t *gc_block, parameter_word
             break;
     }
 
-    return state == Status_Unhandled && user_mcode.validate ? user_mcode.validate(gc_block, value_words) : state;
+    return state == Status_Unhandled && user_mcode.validate ? user_mcode.validate(gc_block, deprecated) : state;
 }
 
 static void report_position (void)
@@ -149,49 +150,49 @@ static void userMCodeExecute (uint_fast16_t state, parser_block_t *gc_block)
     bool handled = true;
 
     if (state != STATE_CHECK_MODE)
-      switch((uint32_t)gc_block->user_mcode) {
+      switch(gc_block->user_mcode) {
 
-        case 42:
+        case OpenPNP_SetPinState:
             hal.port.digital_out(gc_block->values.p, gc_block->values.s != 0.0f);
             break;
 
 
-        case 105: // Request temperature report
+        case OpenPNP_GetADCReading: // Request temperature report
             tport = gc_block->values.t;
             protocol_enqueue_rt_command(report_temperature);
             break;
 
-        case 114:
+        case OpenPNP_GetCurrentPosition:
             report_position();
             break;
 
-        case 115:
+        case OpenPNP_FirmwareInfo:
             hal.stream.write("FIRMWARE_NAME:grblHAL ");
             hal.stream.write("FIRMWARE_URL:https%3A//github.com/grblHAL ");
             hal.stream.write("FIRMWARE_VERSION:" GRBL_VERSION " ");
             hal.stream.write("FIRMWARE_BUILD:" GRBL_VERSION_BUILD ASCII_EOL);
             break;
 
-        case 204: // Set acceleration
+        case OpenPNP_SetAcceleration: // Set acceleration
             {
                 uint_fast8_t idx = N_AXIS;
 
                 protocol_buffer_synchronize();
                 do {
                     idx--;
-                    if(m204_words.s || idx == X_AXIS || idx == Y_AXIS)
-                        settings_override_acceleration(idx, m204_words.s ? gc_block->values.s : gc_block->values.t);
+                    if(gc_block->words.s || idx == X_AXIS || idx == Y_AXIS)
+                        settings_override_acceleration(idx, gc_block->words.s ? gc_block->values.s : gc_block->values.t);
                     else
                         settings_override_acceleration(idx, gc_block->values.p);
                 } while(idx);
             }
             break;
 
-        case 400: // Wait for buffered motions to complete
+        case OpenPNP_FinishMoves: // Wait for buffered motions to complete
             protocol_buffer_synchronize();
             break;
 
-        case 502: // Restore acceleration to configured values
+        case OpenPNP_SettingsReset: // Restore acceleration to configured values
             {
                 uint_fast8_t idx = N_AXIS;
 
