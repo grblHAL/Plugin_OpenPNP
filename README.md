@@ -1,4 +1,4 @@
-## OpenPNP Plugin
+## OpenPNP plugin
 
 Under development. Adds 5 M-codes to allow grblHAL to be used for [OpenPNP](https://openpnp.org/) machines.
 
@@ -8,7 +8,7 @@ Under development. Adds 5 M-codes to allow grblHAL to be used for [OpenPNP](http
 
 * `M115` Reports firmware information.
 
-* `M204 P- S-` To be completed, does not return an error. Requires a core change.
+* `M204 <P-> <S-> <T->` Use S- or T-word to set acceleration for all axes except the linear axis \(Z-axis\), use P-word to set it for all axes. If the word parameter is 0 acceleration is reset to default values.
 
 * `M400` Waits until the motion buffers are cleared and motion stopped. Same function as `G4P0`.
 
@@ -17,4 +17,4 @@ Dependencies:
 Driver must have one or more [ioports ports](https://github.com/grblHAL/Templates/blob/master/ioports.c) available for digital output to enable `M42` use.
 
 ---
-2021-05-09
+2021-07-26
