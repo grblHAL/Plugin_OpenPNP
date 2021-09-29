@@ -12,7 +12,7 @@ Under development. Adds 5 M-codes to allow grblHAL to be used for [OpenPNP](http
 
 * `M400` Waits until the motion buffers are cleared and motion stopped. Same function as `G4P0`.
 
-Dependencies:
+#### Dependencies:
 
 Driver must have one or more [ioports ports](https://github.com/grblHAL/Templates/blob/master/ioports.c) available for digital output to enable `M42` use.
 
