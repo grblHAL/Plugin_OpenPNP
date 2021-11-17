@@ -170,7 +170,9 @@ static void userMCodeExecute (uint_fast16_t state, parser_block_t *gc_block)
             hal.stream.write("FIRMWARE_NAME:grblHAL ");
             hal.stream.write("FIRMWARE_URL:https%3A//github.com/grblHAL ");
             hal.stream.write("FIRMWARE_VERSION:" GRBL_VERSION " ");
-            hal.stream.write("FIRMWARE_BUILD:" GRBL_VERSION_BUILD ASCII_EOL);
+            hal.stream.write("FIRMWARE_BUILD:");
+            hal.stream.write(uitoa(GRBL_BUILD));
+            hal.stream.write(ASCII_EOL);
             break;
 
         case OpenPNP_SetAcceleration: // Set acceleration
