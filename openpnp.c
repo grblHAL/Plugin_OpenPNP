@@ -4,7 +4,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2021 Terje Io
+  Copyright (c) 2021-2022 Terje Io
 
   Grbl is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -26,6 +26,7 @@
 #if OPENPNP_ENABLE
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "grbl/hal.h"
@@ -81,8 +82,7 @@ static status_code_t userMCodeValidate (parser_block_t *gc_block, parameter_word
             break;
 
         case OpenPNP_GetCurrentPosition:
-            gc_block->words.d = Off;
-            // check if d value is 0 or 1?
+            gc_block->words.d = gc_block->words.r = Off;
             state = Status_OK;
             break;
 
@@ -117,26 +117,47 @@ static status_code_t userMCodeValidate (parser_block_t *gc_block, parameter_word
     return state == Status_Unhandled && user_mcode.validate ? user_mcode.validate(gc_block, deprecated) : state;
 }
 
-static void report_position (void)
+static void report_position (bool real, bool detailed)
 {
     uint_fast8_t idx;
     int32_t current_position[N_AXIS];
     float print_position[N_AXIS];
     char buf[(STRLEN_COORDVALUE + 4) * N_AXIS];
 
-    memcpy(current_position, sys.position, sizeof(sys.position));
-    system_convert_array_steps_to_mpos(print_position, current_position);
+    if(real || detailed) {
+        memcpy(current_position, sys.position, sizeof(sys.position));
+
+    if(real)
+        system_convert_array_steps_to_mpos(print_position, current_position);
+    } else
+        memcpy(print_position, gc_state.position, sizeof(print_position));
 
     *buf = '\0';
     for (idx = 0; idx < N_AXIS; idx++) {
         print_position[idx] -= gc_get_offset(idx);
         strcat(buf, axis_letter[idx]);
         strcat(buf, ":");
-        strcat(buf, ftoa(print_position[idx], N_DECIMAL_COORDVALUE_MM)); // always mm and 4 decimals?
-        strcat(buf, idx == N_AXIS - 1 ? ASCII_EOL : " ");
+        strcat(buf, ftoa(print_position[idx], N_DECIMAL_COORDVALUE_MM)); // always mm and 3 decimals?
+        strcat(buf, idx == N_AXIS - 1 ? (detailed ? " " : ASCII_EOL) : " ");
     }
 
     hal.stream.write(buf);
+
+    if(detailed) {
+
+        *buf = '\0';
+        hal.stream.write("Count ");
+
+        for (idx = 0; idx < N_AXIS; idx++) {
+            print_position[idx] -= gc_get_offset(idx);
+            strcat(buf, axis_letter[idx]);
+            strcat(buf, ":");
+            itoa(current_position[idx], strchr(buf, '\0'), 10);
+            strcat(buf, idx == N_AXIS - 1 ? ASCII_EOL : " ");
+        }
+
+        hal.stream.write(buf);
+    }
 }
 
 static void report_temperature (sys_state_t state)
@@ -156,14 +177,13 @@ static void userMCodeExecute (uint_fast16_t state, parser_block_t *gc_block)
             hal.port.digital_out(gc_block->values.p, gc_block->values.s != 0.0f);
             break;
 
-
         case OpenPNP_GetADCReading: // Request temperature report
             tport = gc_block->values.t;
             protocol_enqueue_rt_command(report_temperature);
             break;
 
         case OpenPNP_GetCurrentPosition:
-            report_position();
+            report_position(gc_block->words.r, gc_block->words.d);
             break;
 
         case OpenPNP_FirmwareInfo:
@@ -219,7 +239,7 @@ static void onReportOptions (bool newopt)
     on_report_options(newopt);
 
     if(!newopt)
-        hal.stream.write("[PLUGIN:OpenPNP v0.01]" ASCII_EOL);
+        hal.stream.write("[PLUGIN:OpenPNP v0.02]" ASCII_EOL);
 }
 
 void openpnp_init (void)
