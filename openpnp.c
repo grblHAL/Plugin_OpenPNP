@@ -4,7 +4,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2021-2022 Terje Io
+  Copyright (c) 2021-2024 Terje Io
 
   Grbl is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -160,7 +160,7 @@ static void report_position (bool real, bool detailed)
     }
 }
 
-static void report_temperature (sys_state_t state)
+static void report_temperature (void *data)
 {
     int32_t v = hal.port.wait_on_input(false, tport, WaitMode_Immediate, 0.0f);
     // format output -> T:21.17 /0.0000 B:21.04 /0.0000 @:0 B@:0
@@ -179,7 +179,7 @@ static void userMCodeExecute (uint_fast16_t state, parser_block_t *gc_block)
 
         case OpenPNP_GetADCReading: // Request temperature report
             tport = gc_block->values.t;
-            protocol_enqueue_rt_command(report_temperature);
+            protocol_enqueue_foreground_task(report_temperature, NULL);
             break;
 
         case OpenPNP_GetCurrentPosition:
@@ -239,7 +239,7 @@ static void onReportOptions (bool newopt)
     on_report_options(newopt);
 
     if(!newopt)
-        hal.stream.write("[PLUGIN:OpenPNP v0.02]" ASCII_EOL);
+        hal.stream.write("[PLUGIN:OpenPNP v0.03]" ASCII_EOL);
 }
 
 void openpnp_init (void)
