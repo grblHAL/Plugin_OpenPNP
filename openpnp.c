@@ -36,38 +36,27 @@ static user_mcode_ptrs_t user_mcode;
 static on_report_options_ptr on_report_options;
 static uint8_t tport;
 
-static user_mcode_t userMCodeCheck (user_mcode_t mcode)
+static user_mcode_type_t userMCodeCheck (user_mcode_t mcode)
 {
     return mcode == OpenPNP_SetPinState || mcode == OpenPNP_GetADCReading || mcode == OpenPNP_GetCurrentPosition || mcode == OpenPNP_FirmwareInfo ||
              mcode == OpenPNP_SetAcceleration || mcode == OpenPNP_FinishMoves || mcode == OpenPNP_SettingsReset
-            ? mcode
-            : (user_mcode.check ? user_mcode.check(mcode) : UserMCode_Ignore);
+            ? UserMCode_Normal
+            : (user_mcode.check ? user_mcode.check(mcode) : UserMCode_Unsupported);
 }
 
-static status_code_t userMCodeValidate (parser_block_t *gc_block, parameter_words_t *deprecated)
+static status_code_t userMCodeValidate (parser_block_t *gc_block)
 {
     status_code_t state = Status_GcodeValueWordMissing;
-
-    UNUSED(deprecated);
 
     switch(gc_block->user_mcode) {
 
         case OpenPNP_SetPinState:
             if(gc_block->words.p && gc_block->words.s) {
-
-                if(gc_block->words.p && isnan(gc_block->values.p))
-                    state = Status_BadNumberFormat;
-
-                if(gc_block->words.s && isnan(gc_block->values.s))
-                    state = Status_BadNumberFormat;
-
-                if(state != Status_BadNumberFormat) {
-                    if(gc_block->values.p <= 255.0f && (uint8_t)gc_block->values.p < hal.port.num_digital_out) {
-                        gc_block->words.p = gc_block->words.s = Off;
-                        state = Status_OK;
-                    } else
-                        state = Status_InvalidStatement;
-                }
+                if(gc_block->values.p <= 255.0f && (uint8_t)gc_block->values.p < hal.port.num_digital_out) {
+                    gc_block->words.p = gc_block->words.s = Off;
+                    state = Status_OK;
+                } else
+                    state = Status_InvalidStatement;
             }
             break;
 
@@ -87,20 +76,9 @@ static status_code_t userMCodeValidate (parser_block_t *gc_block, parameter_word
             break;
 
         case OpenPNP_SetAcceleration:
-            if(gc_block->words.p && isnan(gc_block->values.p))
-                state = Status_BadNumberFormat;
-
-            if(gc_block->words.r && isnan(gc_block->values.r))
-                state = Status_BadNumberFormat;
-
-            if(gc_block->words.s && isnan(gc_block->values.s))
-                state = Status_BadNumberFormat;
-
-            if(state != Status_BadNumberFormat) {
-                gc_block->words.p = gc_block->words.r = gc_block->words.s = gc_block->words.t = Off;
-                // TODO: add validation
-                state = Status_OK;
-            }
+            gc_block->words.p = gc_block->words.r = gc_block->words.s = gc_block->words.t = Off;
+            // TODO: add validation
+            state = Status_OK;
             break;
 
         case OpenPNP_FirmwareInfo:
@@ -114,7 +92,7 @@ static status_code_t userMCodeValidate (parser_block_t *gc_block, parameter_word
             break;
     }
 
-    return state == Status_Unhandled && user_mcode.validate ? user_mcode.validate(gc_block, deprecated) : state;
+    return state == Status_Unhandled && user_mcode.validate ? user_mcode.validate(gc_block) : state;
 }
 
 static void report_position (bool real, bool detailed)
@@ -162,7 +140,7 @@ static void report_position (bool real, bool detailed)
 
 static void report_temperature (void *data)
 {
-    int32_t v = hal.port.wait_on_input(false, tport, WaitMode_Immediate, 0.0f);
+//    int32_t v = hal.port.wait_on_input(false, tport, WaitMode_Immediate, 0.0f);
     // format output -> T:21.17 /0.0000 B:21.04 /0.0000 @:0 B@:0
 }
 
@@ -239,16 +217,16 @@ static void onReportOptions (bool newopt)
     on_report_options(newopt);
 
     if(!newopt)
-        hal.stream.write("[PLUGIN:OpenPNP v0.04]" ASCII_EOL);
+        report_plugin("OpenPNP", "0.05");
 }
 
 void openpnp_init (void)
 {
-    memcpy(&user_mcode, &hal.user_mcode, sizeof(user_mcode_ptrs_t));
+    memcpy(&user_mcode, &grbl.user_mcode, sizeof(user_mcode_ptrs_t));
 
-    hal.user_mcode.check = userMCodeCheck;
-    hal.user_mcode.validate = userMCodeValidate;
-    hal.user_mcode.execute = userMCodeExecute;
+    grbl.user_mcode.check = userMCodeCheck;
+    grbl.user_mcode.validate = userMCodeValidate;
+    grbl.user_mcode.execute = userMCodeExecute;
 
     on_report_options = grbl.on_report_options;
     grbl.on_report_options = onReportOptions;
