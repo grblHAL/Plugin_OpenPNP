@@ -4,7 +4,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2021-2024 Terje Io
+  Copyright (c) 2021-2025 Terje Io
 
   grblHAL is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -40,9 +40,50 @@ static user_mcode_type_t userMCodeCheck (user_mcode_t mcode)
 {
     return mcode == OpenPNP_SetPinState || mcode == OpenPNP_GetADCReading || mcode == OpenPNP_GetCurrentPosition || mcode == OpenPNP_FirmwareInfo ||
              mcode == OpenPNP_SetAcceleration || mcode == OpenPNP_FinishMoves || mcode == OpenPNP_SettingsReset
+#if ENABLE_JERK_ACCELERATION
+             || mcode == OpenPNP_SetJerk
+#endif
             ? UserMCode_Normal
             : (user_mcode.check ? user_mcode.check(mcode) : UserMCode_Unsupported);
 }
+
+#if ENABLE_JERK_ACCELERATION
+
+static const parameter_words_t wordmap[] = {
+   { .x = On },
+   { .y = On },
+   { .z = On },
+#if N_AXIS > 3
+   { .a = On },
+   { .b = On },
+   { .c = On },
+#endif
+#if N_AXIS > 6
+   { .u = On },
+   { .v = On }
+#endif
+};
+
+// Validate M-code axis parameters
+static axes_signals_t mcode_validate_axis_values (parser_block_t *gc_block)
+{
+    uint_fast8_t idx = N_AXIS;
+    axes_signals_t axes = {};
+
+    do {
+        idx--;
+        if(gc_block->words.mask & wordmap[idx].mask) {
+            if(!isnan(gc_block->values.xyz[idx])) {
+                bit_true(axes.bits, bit(idx));
+                gc_block->words.mask &= ~wordmap[idx].mask;
+            }
+        }
+    } while(idx);
+
+    return axes;
+}
+
+#endif // ENABLE_JERK_ACCELERATION
 
 static status_code_t userMCodeValidate (parser_block_t *gc_block)
 {
@@ -80,6 +121,13 @@ static status_code_t userMCodeValidate (parser_block_t *gc_block)
             // TODO: add validation
             state = Status_OK;
             break;
+
+#if ENABLE_JERK_ACCELERATION
+        case OpenPNP_SetJerk:
+            if(mcode_validate_axis_values(gc_block).value)
+                state = mcode_validate_axis_values(gc_block).value ? Status_OK : Status_GcodeNoAxisWords;
+            break;
+#endif
 
         case OpenPNP_FirmwareInfo:
         case OpenPNP_FinishMoves:
@@ -173,7 +221,7 @@ static void userMCodeExecute (uint_fast16_t state, parser_block_t *gc_block)
             hal.stream.write(ASCII_EOL);
             break;
 
-        case OpenPNP_SetAcceleration: // Set acceleration
+        case OpenPNP_SetAcceleration:
             {
                 uint_fast8_t idx = N_AXIS;
 
@@ -187,6 +235,21 @@ static void userMCodeExecute (uint_fast16_t state, parser_block_t *gc_block)
                 } while(idx);
             }
             break;
+
+#if ENABLE_JERK_ACCELERATION
+        case OpenPNP_SetJerk:
+            {
+                uint_fast8_t idx = N_AXIS;
+                axes_signals_t axes = mcode_validate_axis_values(gc_block);
+
+                protocol_buffer_synchronize();
+                do {
+                    if(bit_istrue(axes.bits, bit(--idx)))
+                        settings_override_jerk(idx, gc_block->values.xyz[idx]);
+                } while(idx);
+            }
+            break;
+#endif
 
         case OpenPNP_FinishMoves: // Wait for buffered motions to complete
             protocol_buffer_synchronize();
@@ -217,7 +280,7 @@ static void onReportOptions (bool newopt)
     on_report_options(newopt);
 
     if(!newopt)
-        report_plugin("OpenPNP", "0.05");
+        report_plugin("OpenPNP", "0.06");
 }
 
 void openpnp_init (void)
@@ -232,4 +295,4 @@ void openpnp_init (void)
     grbl.on_report_options = onReportOptions;
 }
 
-#endif
+#endif // OPENPNP_ENABLE
