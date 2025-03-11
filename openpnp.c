@@ -93,7 +93,7 @@ static status_code_t userMCodeValidate (parser_block_t *gc_block)
 
         case OpenPNP_SetPinState:
             if(gc_block->words.p && gc_block->words.s) {
-                if(gc_block->values.p <= 255.0f && (uint8_t)gc_block->values.p < hal.port.num_digital_out) {
+                if(gc_block->values.p <= 255.0f && (uint8_t)gc_block->values.p < ioports_unclaimed(Port_Digital, Port_Output)) {
                     gc_block->words.p = gc_block->words.s = Off;
                     state = Status_OK;
                 } else
@@ -103,7 +103,7 @@ static status_code_t userMCodeValidate (parser_block_t *gc_block)
 
         case OpenPNP_GetADCReading:
             if(gc_block->words.t) {
-                if(gc_block->values.t < hal.port.num_analog_in) {
+                if(gc_block->values.t < ioports_unclaimed(Port_Analog, Port_Input)) {
                     gc_block->words.t = Off;
                     state = Status_OK;
                 } else
