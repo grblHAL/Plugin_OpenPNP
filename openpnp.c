@@ -31,6 +31,7 @@
 
 #include "grbl/hal.h"
 #include "grbl/protocol.h"
+#include "grbl/task.h"
 
 static user_mcode_ptrs_t user_mcode;
 static on_report_options_ptr on_report_options;
@@ -205,7 +206,7 @@ static void userMCodeExecute (uint_fast16_t state, parser_block_t *gc_block)
 
         case OpenPNP_GetADCReading: // Request temperature report
             tport = gc_block->values.t;
-            protocol_enqueue_foreground_task(report_temperature, NULL);
+            task_add_immediate(report_temperature, NULL);
             break;
 
         case OpenPNP_GetCurrentPosition:
@@ -280,7 +281,7 @@ static void onReportOptions (bool newopt)
     on_report_options(newopt);
 
     if(!newopt)
-        report_plugin("OpenPNP", "0.06");
+        report_plugin("OpenPNP", "0.07");
 }
 
 void openpnp_init (void)
