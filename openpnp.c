@@ -33,13 +33,22 @@
 #include "grbl/protocol.h"
 #include "grbl/task.h"
 
+#define NUM_ADCINPUTS 8
+
+typedef struct {
+    float factor;
+    float offset;
+} adc_scaling_t;
+
+static uint8_t n_adc_inputs = 0, n_digital_outputs = 0;
+static adc_scaling_t adc_scaling[NUM_ADCINPUTS];
 static user_mcode_ptrs_t user_mcode;
 static on_report_options_ptr on_report_options;
-static uint8_t tport;
 
 static user_mcode_type_t userMCodeCheck (user_mcode_t mcode)
 {
-    return mcode == OpenPNP_SetPinState || mcode == OpenPNP_GetADCReading || mcode == OpenPNP_GetCurrentPosition || mcode == OpenPNP_FirmwareInfo ||
+    return mcode == OpenPNP_SetPinState || mcode == OpenPNP_GetCurrentPosition || mcode == OpenPNP_FirmwareInfo ||
+            mcode == OpenPNP_GetADCRaw || mcode == OpenPNP_GetADCScaled || mcode == OpenPNP_SetADCScaling ||
              mcode == OpenPNP_SetAcceleration || mcode == OpenPNP_FinishMoves || mcode == OpenPNP_SettingsReset
 #if ENABLE_JERK_ACCELERATION
              || mcode == OpenPNP_SetJerk
@@ -94,18 +103,8 @@ static status_code_t userMCodeValidate (parser_block_t *gc_block)
 
         case OpenPNP_SetPinState:
             if(gc_block->words.p && gc_block->words.s) {
-                if(gc_block->values.p <= 255.0f && (uint8_t)gc_block->values.p < ioports_unclaimed(Port_Digital, Port_Output)) {
+                if(gc_block->values.p <= 255.0f && (uint8_t)gc_block->values.p < n_digital_outputs) {
                     gc_block->words.p = gc_block->words.s = Off;
-                    state = Status_OK;
-                } else
-                    state = Status_InvalidStatement;
-            }
-            break;
-
-        case OpenPNP_GetADCReading:
-            if(gc_block->words.t) {
-                if(gc_block->values.t < ioports_unclaimed(Port_Analog, Port_Input)) {
-                    gc_block->words.t = Off;
                     state = Status_OK;
                 } else
                     state = Status_InvalidStatement;
@@ -115,6 +114,26 @@ static status_code_t userMCodeValidate (parser_block_t *gc_block)
         case OpenPNP_GetCurrentPosition:
             gc_block->words.d = gc_block->words.r = Off;
             state = Status_OK;
+            break;
+
+        case OpenPNP_GetADCRaw:
+        case OpenPNP_GetADCScaled:
+            if(gc_block->words.p && (uint8_t)gc_block->values.p < n_adc_inputs) {
+                gc_block->words.p = Off;
+                state = Status_OK;
+            }
+            break;
+
+        case OpenPNP_SetADCScaling:
+            if(gc_block->words.p && (uint8_t)gc_block->values.p < n_adc_inputs && gc_block->words.q && gc_block->words.s) {
+                uint_fast8_t port;
+                if((port = (uint8_t)gc_block->values.p) < n_adc_inputs) {
+                    state = Status_OK;
+
+                    gc_block->words.p = gc_block->words.q = gc_block->words.s = Off;
+                } else
+                    state = Status_InvalidStatement;
+            }
             break;
 
         case OpenPNP_SetAcceleration:
@@ -187,26 +206,15 @@ static void report_position (bool real, bool detailed)
     }
 }
 
-static void report_temperature (void *data)
-{
-//    int32_t v = hal.port.wait_on_input(false, tport, WaitMode_Immediate, 0.0f);
-    // format output -> T:21.17 /0.0000 B:21.04 /0.0000 @:0 B@:0
-}
-
 static void userMCodeExecute (uint_fast16_t state, parser_block_t *gc_block)
 {
     bool handled = true;
 
-    if (state != STATE_CHECK_MODE)
+    if(state != STATE_CHECK_MODE)
       switch(gc_block->user_mcode) {
 
         case OpenPNP_SetPinState:
             hal.port.digital_out(gc_block->values.p, gc_block->values.s != 0.0f);
-            break;
-
-        case OpenPNP_GetADCReading: // Request temperature report
-            tport = gc_block->values.t;
-            task_add_immediate(report_temperature, NULL);
             break;
 
         case OpenPNP_GetCurrentPosition:
@@ -220,6 +228,27 @@ static void userMCodeExecute (uint_fast16_t state, parser_block_t *gc_block)
             hal.stream.write("FIRMWARE_BUILD:");
             hal.stream.write(uitoa(GRBL_BUILD));
             hal.stream.write(ASCII_EOL);
+            break;
+
+        case OpenPNP_GetADCRaw:
+        case OpenPNP_GetADCScaled:
+            {
+                float v = (float)hal.port.wait_on_input(false, (uint8_t)gc_block->values.p, WaitMode_Immediate, 0.0f);
+                if(gc_block->user_mcode == OpenPNP_GetADCScaled) {
+                    v += adc_scaling[(uint8_t)gc_block->values.p].offset;
+                    v *= adc_scaling[(uint8_t)gc_block->values.p].factor;
+                }
+                hal.stream.write("A");
+                hal.stream.write(uitoa((uint32_t)gc_block->values.p));
+                hal.stream.write(":");
+                hal.stream.write(ftoa(v, 2));
+                hal.stream.write(ASCII_EOL);
+            }
+            break;
+
+        case OpenPNP_SetADCScaling:
+            adc_scaling[(uint8_t)gc_block->values.p].factor = gc_block->values.s;
+            adc_scaling[(uint8_t)gc_block->values.p].offset = gc_block->values.q;
             break;
 
         case OpenPNP_SetAcceleration:
@@ -281,11 +310,25 @@ static void onReportOptions (bool newopt)
     on_report_options(newopt);
 
     if(!newopt)
-        report_plugin("OpenPNP", "0.07");
+        report_plugin("OpenPNP", "0.08");
+}
+
+static void openpnp_configure (void *data)
+{
+    n_digital_outputs = ioports_unclaimed(Port_Digital, Port_Output);
+    if((n_adc_inputs = ioports_unclaimed(Port_Analog, Port_Input)) > NUM_ADCINPUTS)
+        n_adc_inputs = NUM_ADCINPUTS;
 }
 
 void openpnp_init (void)
 {
+    uint_fast8_t idx = sizeof(adc_scaling) / sizeof(adc_scaling_t);
+
+    do {
+        adc_scaling[--idx].factor = 1.0f;
+        adc_scaling[idx].offset = 0.0f;
+    } while(idx);
+
     memcpy(&user_mcode, &grbl.user_mcode, sizeof(user_mcode_ptrs_t));
 
     grbl.user_mcode.check = userMCodeCheck;
@@ -294,6 +337,8 @@ void openpnp_init (void)
 
     on_report_options = grbl.on_report_options;
     grbl.on_report_options = onReportOptions;
+
+    task_run_on_startup(openpnp_configure, NULL);
 }
 
 #endif // OPENPNP_ENABLE
