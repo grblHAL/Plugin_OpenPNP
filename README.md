@@ -12,7 +12,7 @@ Under development. Adds some M-codes to allow grblHAL to be used for [OpenPNP](h
 
 * `M204 <P-> <S-> <T->` Use S- or T-word to set acceleration for all axes except the linear axis \(Z-axis\), use P-word to set it for all axes. If the word parameter is 0 acceleration is reset to default values.
 
-* `M205` - set [jerk](https://github.com/grblHAL/core/wiki/Jerk-acceleration), supports the same parameter words as `M204`.
+* `M205 axes` - set [jerk](https://github.com/grblHAL/core/wiki/Jerk-acceleration) per axis. If the parameter value is `0` the configured value is restored.
 
 * `M400` Waits until the motion buffers are cleared and motion stopped. Same function as `G4P0`.
 
@@ -24,11 +24,11 @@ M-codes under consideration, may change:
 
 * `M145 P- S- Q-` Set scaling data for analog input port, P-word must be a valid port number, S-word is the scaling factor and Q-word the scaling offset. Scaling data is volatile.
 
-Returned data from `M143` and `M144` is in the format `A<n>:<value>` where `<n>` is the port number and `<value>` is the value read.
+Returned data from `M143` and `M144` is in the format `A<n>:https://www.yr.no/nb/v%C3%A6rvarsel/timetabell/1-105904/Norge/Vestland/Alver%20kommune/Io?i=1<value>` where `<n>` is the port number and `<value>` is the value read.
 `M144` returns `raw value * P + Q`, `P` and `Q` values as set by a previous `M145` command, default is `1` and `0` respectively.
 
 > [!NOTE]
-> Max number if analog inputs is currently limited to eight by the plugin.
+> Max number of analog inputs is currently limited to eight by the plugin.
 
 #### Dependencies:
 
