@@ -40,7 +40,7 @@ typedef struct {
     float offset;
 } adc_scaling_t;
 
-static uint8_t n_adc_inputs = 0, n_digital_outputs = 0;
+static uint8_t n_analog_inputs = 0, n_digital_outputs = 0, n_digital_inputs = 0;;
 static adc_scaling_t adc_scaling[NUM_ADCINPUTS];
 static user_mcode_ptrs_t user_mcode;
 static on_report_options_ptr on_report_options;
@@ -48,7 +48,7 @@ static on_report_options_ptr on_report_options;
 static user_mcode_type_t userMCodeCheck (user_mcode_t mcode)
 {
     return mcode == OpenPNP_SetPinState || mcode == OpenPNP_GetCurrentPosition || mcode == OpenPNP_FirmwareInfo ||
-            mcode == OpenPNP_GetADCRaw || mcode == OpenPNP_GetADCScaled || mcode == OpenPNP_SetADCScaling ||
+            mcode == OpenPNP_GetPinState || mcode == OpenPNP_GetADCScaled || mcode == OpenPNP_SetADCScaling ||
              mcode == OpenPNP_SetAcceleration || mcode == OpenPNP_FinishMoves || mcode == OpenPNP_SettingsReset
 #if ENABLE_JERK_ACCELERATION
              || mcode == OpenPNP_SetJerk
@@ -95,6 +95,12 @@ static axes_signals_t mcode_validate_axis_values (parser_block_t *gc_block)
 
 #endif // ENABLE_JERK_ACCELERATION
 
+// Validate M-code port parameter
+static status_code_t mcode_validate_port (float value, uint8_t n_ports)
+{
+    return isintf(value) ? ((uint8_t)value < n_ports ? Status_OK : Status_InvalidStatement) : Status_BadNumberFormat;
+}
+
 static status_code_t userMCodeValidate (parser_block_t *gc_block)
 {
     status_code_t state = Status_GcodeValueWordMissing;
@@ -116,24 +122,23 @@ static status_code_t userMCodeValidate (parser_block_t *gc_block)
             state = Status_OK;
             break;
 
-        case OpenPNP_GetADCRaw:
-        case OpenPNP_GetADCScaled:
-            if(gc_block->words.p && (uint8_t)gc_block->values.p < n_adc_inputs) {
+        case OpenPNP_GetPinState:
+            if(gc_block->words.e && (state = mcode_validate_port(gc_block->values.e, n_analog_inputs)) == Status_OK)
+                gc_block->words.e = Off;
+            else if(gc_block->words.p && (state = mcode_validate_port(gc_block->values.p, n_digital_inputs)) == Status_OK)
                 gc_block->words.p = Off;
-                state = Status_OK;
-            }
+            break;
+
+        case OpenPNP_GetADCScaled:
+            if(gc_block->words.e && (state = mcode_validate_port(gc_block->values.e, n_analog_inputs)) == Status_OK)
+                gc_block->words.e = Off;
             break;
 
         case OpenPNP_SetADCScaling:
-            if(gc_block->words.p && (uint8_t)gc_block->values.p < n_adc_inputs && gc_block->words.q && gc_block->words.s) {
-                uint_fast8_t port;
-                if((port = (uint8_t)gc_block->values.p) < n_adc_inputs) {
-                    state = Status_OK;
-
-                    gc_block->words.p = gc_block->words.q = gc_block->words.s = Off;
-                } else
-                    state = Status_InvalidStatement;
-            }
+            if(gc_block->words.e && gc_block->words.q && gc_block->words.s && (state = mcode_validate_port(gc_block->values.e, n_analog_inputs)) == Status_OK)
+                gc_block->words.e = gc_block->words.q = gc_block->words.s = Off;
+            else
+                state = Status_InvalidStatement;
             break;
 
         case OpenPNP_SetAcceleration:
@@ -230,16 +235,17 @@ static void userMCodeExecute (uint_fast16_t state, parser_block_t *gc_block)
             hal.stream.write(ASCII_EOL);
             break;
 
-        case OpenPNP_GetADCRaw:
+        case OpenPNP_GetPinState:
         case OpenPNP_GetADCScaled:
             {
-                float v = (float)hal.port.wait_on_input(false, (uint8_t)gc_block->values.p, WaitMode_Immediate, 0.0f);
+                uint8_t port = (uint8_t)(gc_block->words.p ? gc_block->values.p : gc_block->values.e);
+                float v = (float)hal.port.wait_on_input((io_port_type_t)gc_block->words.p, port, WaitMode_Immediate, 0.0f);
                 if(gc_block->user_mcode == OpenPNP_GetADCScaled) {
-                    v += adc_scaling[(uint8_t)gc_block->values.p].offset;
-                    v *= adc_scaling[(uint8_t)gc_block->values.p].factor;
+                    v += adc_scaling[port].offset;
+                    v *= adc_scaling[port].factor;
                 }
-                hal.stream.write("A");
-                hal.stream.write(uitoa((uint32_t)gc_block->values.p));
+                hal.stream.write(gc_block->words.p ? "D" : "A");
+                hal.stream.write(uitoa(port));
                 hal.stream.write(":");
                 hal.stream.write(ftoa(v, 2));
                 hal.stream.write(ASCII_EOL);
@@ -247,8 +253,8 @@ static void userMCodeExecute (uint_fast16_t state, parser_block_t *gc_block)
             break;
 
         case OpenPNP_SetADCScaling:
-            adc_scaling[(uint8_t)gc_block->values.p].factor = gc_block->values.s;
-            adc_scaling[(uint8_t)gc_block->values.p].offset = gc_block->values.q;
+            adc_scaling[(uint8_t)gc_block->values.e].factor = gc_block->values.s;
+            adc_scaling[(uint8_t)gc_block->values.e].offset = gc_block->values.q;
             break;
 
         case OpenPNP_SetAcceleration:
@@ -310,14 +316,15 @@ static void onReportOptions (bool newopt)
     on_report_options(newopt);
 
     if(!newopt)
-        report_plugin("OpenPNP", "0.08");
+        report_plugin("OpenPNP", "0.09");
 }
 
 static void openpnp_configure (void *data)
 {
+    n_digital_inputs = ioports_unclaimed(Port_Digital, Port_Input);
     n_digital_outputs = ioports_unclaimed(Port_Digital, Port_Output);
-    if((n_adc_inputs = ioports_unclaimed(Port_Analog, Port_Input)) > NUM_ADCINPUTS)
-        n_adc_inputs = NUM_ADCINPUTS;
+    if((n_analog_inputs = ioports_unclaimed(Port_Analog, Port_Input)) > NUM_ADCINPUTS)
+        n_analog_inputs = NUM_ADCINPUTS;
 }
 
 void openpnp_init (void)
