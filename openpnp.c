@@ -98,7 +98,7 @@ static axes_signals_t mcode_validate_axis_values (parser_block_t *gc_block)
 // Validate M-code port parameter
 static status_code_t mcode_validate_port (float value, uint8_t n_ports)
 {
-    return isintf(value) ? ((uint8_t)value < n_ports ? Status_OK : Status_InvalidStatement) : Status_BadNumberFormat;
+    return isintf(value) ? ((uint8_t)value < n_ports ? Status_OK : Status_GcodeValueOutOfRange) : Status_GcodeCommandValueNotInteger;
 }
 
 static status_code_t userMCodeValidate (parser_block_t *gc_block)
@@ -219,7 +219,7 @@ static void userMCodeExecute (uint_fast16_t state, parser_block_t *gc_block)
       switch(gc_block->user_mcode) {
 
         case OpenPNP_SetPinState:
-            hal.port.digital_out(gc_block->values.p, gc_block->values.s != 0.0f);
+            ioport_digital_out(gc_block->values.p, gc_block->values.s != 0.0f);
             break;
 
         case OpenPNP_GetCurrentPosition:
@@ -239,15 +239,15 @@ static void userMCodeExecute (uint_fast16_t state, parser_block_t *gc_block)
         case OpenPNP_GetADCScaled:
             {
                 uint8_t port = (uint8_t)(gc_block->words.p ? gc_block->values.p : gc_block->values.e);
-                float v = (float)hal.port.wait_on_input((io_port_type_t)gc_block->words.p, port, WaitMode_Immediate, 0.0f);
+                float v = (float)ioport_wait_on_input((io_port_type_t)gc_block->words.p, port, WaitMode_Immediate, 0.0f);
                 if(gc_block->user_mcode == OpenPNP_GetADCScaled) {
-                    v += adc_scaling[port].offset;
                     v *= adc_scaling[port].factor;
+                    v += adc_scaling[port].offset;
                 }
                 hal.stream.write(gc_block->words.p ? "D" : "A");
                 hal.stream.write(uitoa(port));
                 hal.stream.write(":");
-                hal.stream.write(ftoa(v, 2));
+                hal.stream.write(trim_float(ftoa(v, 2)));
                 hal.stream.write(ASCII_EOL);
             }
             break;
