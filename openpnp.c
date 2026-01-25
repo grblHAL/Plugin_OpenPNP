@@ -57,44 +57,6 @@ static user_mcode_type_t userMCodeCheck (user_mcode_t mcode)
             : (user_mcode.check ? user_mcode.check(mcode) : UserMCode_Unsupported);
 }
 
-#if ENABLE_JERK_ACCELERATION
-
-static const parameter_words_t wordmap[] = {
-   { .x = On },
-   { .y = On },
-   { .z = On },
-#if N_AXIS > 3
-   { .a = On },
-   { .b = On },
-   { .c = On },
-#endif
-#if N_AXIS > 6
-   { .u = On },
-   { .v = On }
-#endif
-};
-
-// Validate M-code axis parameters
-static axes_signals_t mcode_validate_axis_values (parser_block_t *gc_block)
-{
-    uint_fast8_t idx = N_AXIS;
-    axes_signals_t axes = {};
-
-    do {
-        idx--;
-        if(gc_block->words.mask & wordmap[idx].mask) {
-            if(!isnan(gc_block->values.xyz[idx])) {
-                bit_true(axes.bits, bit(idx));
-                gc_block->words.mask &= ~wordmap[idx].mask;
-            }
-        }
-    } while(idx);
-
-    return axes;
-}
-
-#endif // ENABLE_JERK_ACCELERATION
-
 // Validate M-code port parameter
 static status_code_t mcode_validate_port (float value, uint8_t n_ports)
 {
@@ -149,8 +111,7 @@ static status_code_t userMCodeValidate (parser_block_t *gc_block)
 
 #if ENABLE_JERK_ACCELERATION
         case OpenPNP_SetJerk:
-            if(mcode_validate_axis_values(gc_block).value)
-                state = mcode_validate_axis_values(gc_block).value ? Status_OK : Status_GcodeNoAxisWords;
+            state = gc_claim_axis_words(gc_block, (axes_signals_t){ AXES_BITMASK }).value ? Status_OK : Status_GcodeNoAxisWords;
             break;
 #endif
 
@@ -276,7 +237,7 @@ static void userMCodeExecute (uint_fast16_t state, parser_block_t *gc_block)
         case OpenPNP_SetJerk:
             {
                 uint_fast8_t idx = N_AXIS;
-                axes_signals_t axes = mcode_validate_axis_values(gc_block);
+                axes_signals_t axes = gc_claim_axis_words(gc_block, (axes_signals_t){0});
 
                 protocol_buffer_synchronize();
                 do {
@@ -316,7 +277,7 @@ static void onReportOptions (bool newopt)
     on_report_options(newopt);
 
     if(!newopt)
-        report_plugin("OpenPNP", "0.09");
+        report_plugin("OpenPNP", "0.10");
 }
 
 static void openpnp_configure (void *data)
